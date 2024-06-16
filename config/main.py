@@ -389,6 +389,22 @@ def is_interface_bind_to_vrf(config_db, interface_name):
         return True
     return False
 
+def get_interface_ipaddresses(config_db, interface_name):
+    """Get IP addresses attached to interface
+    """
+    ipaddresses = set()
+    table_name = get_interface_table_name(interface_name)
+    if not table_name:
+        return ipaddresses
+
+    keys = config_db.get_keys(table_name)
+    for key in keys:
+        if isinstance(key, tuple) and len(key) == 2:
+            iface, interface_ip = key
+            if iface == interface_name:
+                ipaddresses.add(interface_ip)
+    return ipaddresses
+
 def is_portchannel_name_valid(portchannel_name):
     """Port channel name validation
     """
@@ -3145,6 +3161,111 @@ def autoneg(ctx, interface_name, mode, verbose):
     if verbose:
         command += " -vv"
     clicommon.run_command(command, display_cmd=verbose)
+
+#
+# 'keep_alive' subcommand
+#
+@neighbor.command()
+@click.pass_context
+@click.argument('mode', metavar='<mode>', required=True, type=click.Choice(["enabled", "disabled"]))
+@click.argument('interface_name', metavar='<interface_name>', required=True)
+@click.option('-l', '--linklocal', is_flag=True, help="Enable linklocal (only available in 'enabled' mode)")
+def keep_alive(ctx, mode, interface_name, linklocal):
+    """Set interface neighbor keep-alive status"""
+    # Get the config_db connector
+    config_db = ctx.obj['config_db']
+    if mode != "enabled" and linklocal:
+        ctx.fail("Enable linklocal (only available in 'enabled' mode)!")
+    if clicommon.get_interface_naming_mode() == "alias":
+        interface_name = interface_alias_to_name(config_db, interface_name)
+        if interface_name is None:
+            ctx.fail("'interface_name' is None!")
+
+    intf_fs = parse_interface_in_filter(interface_name)
+    if len(intf_fs) > 1 and multi_asic.is_multi_asic():
+        ctx.fail("Interface range not supported in multi-asic platforms !!")
+    log.log_info("'interface {}' enable arp keepalive executing...".format(interface_name))
+
+    ip_addresses = get_interface_ipaddresses(config_db, interface_name)
+    if not ip_addresses:
+        ctx.fail("Interface {} ip address doesn't exist, please configure the interface ip address first".format(
+            interface_name))
+
+    fvs = {}
+    if interface_name.startswith("Vlan"):
+        if clicommon.check_if_vlanid_exist(config_db, interface_name) == False:
+            ctx.fail("{} does not exist".format(interface_name))
+        if mode == "enabled":
+            fvs['status'] = 'enable'
+            if linklocal:
+                fvs['linklocal_status'] = 'enable'
+            else:
+                fvs['linklocal_status'] = 'disable'
+            config_db.mod_entry("CFG_ARPKEEPALIVE", interface_name, fvs)
+        else:
+            fvs['status'] = 'disable'
+            if linklocal:
+                fvs['linklocal_status'] = 'enable'
+            else:
+                fvs['linklocal_status'] = 'disable'
+            config_db.mod_entry("CFG_ARPKEEPALIVE", interface_name, fvs)
+        return
+    if len(intf_fs) == 1 and interface_name_is_valid(config_db, interface_name) is False:
+        ctx.fail("Interface name is invalid. Please enter a valid interface name!!")
+    port_dict = config_db.get_table('PORT')
+    for port_name in port_dict:
+        if port_name in intf_fs:
+            if mode == "enabled":
+                fvs['status'] = 'enable'
+                if linklocal:
+                    fvs['linklocal_status'] = 'enable'
+                else:
+                    fvs['linklocal_status'] = 'disable'
+                config_db.mod_entry("CFG_ARPKEEPALIVE", port_name, fvs)
+        else:
+            fvs['status'] = 'disable'
+            if linklocal:
+                fvs['linklocal_status'] = 'enable'
+            else:
+                fvs['linklocal_status'] = 'disable'
+            config_db.mod_entry("CFG_ARPKEEPALIVE", port_name, fvs)
+
+    portchannel_list = config_db.get_table("PORTCHANNEL")
+    for po_name in portchannel_list:
+        if po_name in intf_fs:
+            if mode == "enabled":
+                fvs['status'] = 'enable'
+                if linklocal:
+                    fvs['linklocal_status'] = 'enable'
+                else:
+                    fvs['linklocal_status'] = 'disable'
+                config_db.mod_entry("CFG_ARPKEEPALIVE", po_name, fvs)
+            else:
+                fvs['status'] = 'disable'
+                if linklocal:
+                    fvs['linklocal_status'] = 'enable'
+                else:
+                    fvs['linklocal_status'] = 'disable'
+                config_db.mod_entry("CFG_ARPKEEPALIVE", po_name, fvs)
+
+    subport_list = config_db.get_table("VLAN_SUB_INTERFACE")
+    for sp_name in subport_list:
+        if sp_name in intf_fs:
+            if mode == "enabled":
+                fvs['status'] = 'enable'
+                if linklocal:
+                    fvs['linklocal_status'] = 'enable'
+                else:
+                    fvs['linklocal_status'] = 'disable'
+                config_db.mod_entry("CFG_ARPKEEPALIVE", sp_name, fvs)
+            else:
+                fvs['status'] = 'disable'
+                if linklocal:
+                    fvs['linklocal_status'] = 'enable'
+                else:
+                    fvs['linklocal_status'] = 'disable'
+                config_db.mod_entry("CFG_ARPKEEPALIVE", sp_name, fvs)
+
 
 #
 # 'breakout' subcommand

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 import click
 import utilities_common.cli as clicommon
@@ -500,3 +501,27 @@ def autoneg_status(interfacename, namespace, display, verbose):
         cmd += " -n {}".format(namespace)
 
     clicommon.run_command(cmd, display_cmd=verbose)
+
+def natural_sort_key(s):
+    return [int(x) if x.isdigit() else x for x in re.split(r'(\d+)', s)]
+
+
+# 'keep-alive' subcommand ("show interface neighbor keep-alive ...")
+@neighbor.command()
+@click.pass_context
+def keep_alive(ctx):
+    """Show interface neighbor keep-alive information"""
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    header = ['Interface', 'Status', 'Linklocal']
+    body = []
+    arp_alive_table = dict(sorted(config_db.get_table('CFG_ARPKEEPALIVE').items(), key=lambda x: natural_sort_key(x[0])))
+    for arp_alive in arp_alive_table:
+        linklocal = 'disable'
+        status = 'disable'
+        if 'linklocal_status' in arp_alive_table[arp_alive] and arp_alive_table[arp_alive]['linklocal_status'] == 'enable':
+            linklocal = 'enable'
+        if 'status' in arp_alive_table[arp_alive] and arp_alive_table[arp_alive]['status'] == 'enable':
+            status = 'enable'
+        body.append([arp_alive, status, linklocal])
+    click.echo(tabulate(body, header))
